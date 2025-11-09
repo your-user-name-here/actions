@@ -1,0 +1,110 @@
+name: 'Validate Pull Request'
+description: 'Validates if PR only modifies Contributors.md and has minimal changes'
+author: 'Your Organization'
+
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  pr-number:
+    description: 'Pull request number'
+    required: true
+  additions:
+    description: 'Number of additions in the PR'
+    required: true
+  deletions:
+    description: 'Number of deletions in the PR'
+    required: true
+  github-token:
+    description: 'GitHub token for API access'
+    required: true
+  target-file:
+    description: 'Target file to check (default: Contributors.md)'
+    required: false
+    default: 'Contributors.md'
+
+outputs:
+  should-merge:
+    description: 'Whether the PR should be auto-merged (true/false)'
+    value: ${{ steps.validate.outputs.should-merge }}
+  files-changed:
+    description: 'Space-separated list of files changed in the PR'
+    value: ${{ steps.validate.outputs.files-changed }}
+  only-target-file:
+    description: 'Whether only the target file was changed (true/false)'
+    value: ${{ steps.validate.outputs.only-target-file }}
+  one-line-change:
+    description: 'Whether the change is minimal (true/false)'
+    value: ${{ steps.validate.outputs.one-line-change }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate PR changes
+      id: validate
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        ADDITIONS: ${{ inputs.additions }}
+        DELETIONS: ${{ inputs.deletions }}
+        TARGET_FILE: ${{ inputs.target-file }}
+      run: |
+        echo "::group::Fetching PR files"
+        
+        # Get files changed in the PR
+        PR_FILES=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+          "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER/files" | \
+          jq -r '.[].filename')
+        
+        FILES_CHANGED=$(echo "$PR_FILES" | tr '\n' ' ')
+        echo "Files changed: $FILES_CHANGED"
+        echo "files-changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+        
+        echo "::endgroup::"
+        
+        echo "::group::Checking file restrictions"
+        
+        # Check if only target file was changed
+        ONLY_TARGET_FILE=false
+        if [[ "${FILES_CHANGED// /}" == "$TARGET_FILE" ]]; then
+          ONLY_TARGET_FILE=true
+          echo "✓ Only $TARGET_FILE was modified"
+        else
+          echo "✗ Other files were modified besides $TARGET_FILE"
+        fi
+        echo "only-target-file=$ONLY_TARGET_FILE" >> $GITHUB_OUTPUT
+        
+        echo "::endgroup::"
+        
+        echo "::group::Checking change size"
+        
+        # Check if changes are minimal (1 line addition or 2 additions + 1 deletion)
+        ONE_LINE_CHANGE=false
+        if [[ $ADDITIONS == 1 && $DELETIONS == 0 ]]; then
+          ONE_LINE_CHANGE=true
+          echo "✓ Single line addition detected"
+        elif [[ $ADDITIONS == 2 && $DELETIONS == 1 ]]; then
+          ONE_LINE_CHANGE=true
+          echo "✓ Single line modification detected (2 add, 1 delete)"
+        else
+          echo "✗ Changes exceed minimal threshold (additions: $ADDITIONS, deletions: $DELETIONS)"
+        fi
+        echo "one-line-change=$ONE_LINE_CHANGE" >> $GITHUB_OUTPUT
+        
+        echo "::endgroup::"
+        
+        echo "::group::Final validation result"
+        
+        # Determine if PR should be merged
+        SHOULD_MERGE=false
+        if [[ "$ONLY_TARGET_FILE" == "true" && "$ONE_LINE_CHANGE" == "true" ]]; then
+          SHOULD_MERGE=true
+          echo "✓ PR passes all validation checks - eligible for auto-merge"
+        else
+          echo "✗ PR does not meet auto-merge criteria"
+        fi
+        echo "should-merge=$SHOULD_MERGE" >> $GITHUB_OUTPUT
+        
+        echo "::endgroup::"
