@@ -1,0 +1,11 @@
+{
+  "name": "actions-tests",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "bun test"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}
